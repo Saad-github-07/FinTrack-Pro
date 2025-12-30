@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FinTrack Pro | Secure Finance Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .animate-subtle-bounce { animation: bounce 3s infinite; }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 overflow-x-hidden">
+    <div id="root">
+        <div class="h-screen flex flex-col items-center justify-center p-10 text-center">
+            <div class="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+            <h1 class="text-xl font-black text-slate-800 tracking-tighter uppercase">Initializing Vault</h1>
+        </div>
+    </div>
+
+    <!-- Core Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // --- Your Integrated Configuration ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyC9_YF2SZgJLr7pTc4W86T_80t_-vhDQ7A",
+            authDomain: "shadow-fintrack-pro.firebaseapp.com",
+            projectId: "shadow-fintrack-pro",
+            storageBucket: "shadow-fintrack-pro.firebasestorage.app",
+            messagingSenderId: "925057484980",
+            appId: "1:925057484980:web:50e35903ab6890f004afe1",
+            measurementId: "G-9BQXMHEWMV"
+        };
+
+        // Admin Access List
+        const ADMIN_WHITELIST = ["msajamadar@gmail.com"];
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const { useState, useEffect, useMemo } = React;
+
+        const Logo = () => (
+            <svg viewBox="0 0 24 24" className="w-10 h-10" fill="none">
+                <path d="M12 2L3 7V17L12 22L21 17V7L12 2Z" fill="#4F46E5" fillOpacity="0.1" stroke="#4F46E5" strokeWidth="2" strokeLinejoin="round"/>
+                <path d="M12 22V12M12 12L21 7M12 12L3 7" stroke="#4F46E5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <circle cx="12" cy="12" r="3" fill="white" stroke="#4F46E5" strokeWidth="2"/>
+            </svg>
+        );
+            function App() {
+            const [user, setUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [transactions, setTransactions] = useState([]);
+            const [authMode, setAuthMode] = useState('login');
+            const [authData, setAuthData] = useState({ email: '', password: '' });
+            const [error, setError] = useState('');
+            const [showModal, setShowModal] = useState(false);
+            const [view, setView] = useState('list');
+            const [activeTab, setActiveTab] = useState('all');
+            const [isSubmitting, setIsSubmitting] = useState(false);
+
+            const [formData, setFormData] = useState({
+                type: 'expense', amount: '', category: 'Food', method: 'UPI', note: '', date: new Date().toISOString().split('T')[0]
+            });
+
+            useEffect(() => {
+                return onAuthStateChanged(auth, (u) => {
+                    if (u && !ADMIN_WHITELIST.includes(u.email.toLowerCase())) {
+                        signOut(auth);
+                        setError("Access Denied: Unregistered email.");
+                        setUser(null);
+                    } else {
+                        setUser(u);
+                        setError('');
+                    }
+                    setLoading(false);
+                });
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const q = query(collection(db, "users", user.uid, "transactions"));
+                return onSnapshot(q, (snapshot) => {
+                    const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    setTransactions(data.sort((a,b) => new Date(b.date) - new Date(a.date)));
+                });
+            }, [user]);
+
+            const handleAuth = async (e) => {
+                e.preventDefault();
+                setError('');
+                if (!ADMIN_WHITELIST.includes(authData.email.toLowerCase())) {
+                    setError("Unauthorized email address.");
+                    return;
+                }
+                setIsSubmitting(true);
+                try {
+                    if (authMode === 'login') await signInWithEmailAndPassword(auth, authData.email, authData.password);
+                    else await createUserWithEmailAndPassword(auth, authData.email, authData.password);
+                } catch (err) {
+                    setError(err.message.includes('invalid-credential') ? "Wrong email or password." : err.message);
+                } finally {
+                    setIsSubmitting(false);
+                }
+            };
+
+            const handleAdd = async (e) => {
+                e.preventDefault();
+                if (!formData.amount) return;
+                setIsSubmitting(true);
+                try {
+                    await addDoc(collection(db, "users", user.uid, "transactions"), {
+                        ...formData,
+                        amount: parseFloat(formData.amount),
+                        createdAt: new Date().toISOString()
+                    });
+                    setShowModal(false);
+                    setFormData({ ...formData, amount: '', note: '' });
+                } catch (err) { setError(err.message); }
+                finally { setIsSubmitting(false); }
+            };
+
+            const totals = useMemo(() => {
+                return transactions.reduce((acc, t) => {
+                    const amt = parseFloat(t.amount);
+                    if (t.type === 'income') acc.income += amt;
+                    else if (t.type === 'expense') acc.expense += amt;
+                    else if (t.type === 'investment') acc.investment += amt;
+                    return acc;
+                }, { income: 0, expense: 0, investment: 0 });
+            }, [transactions]);
+
+            if (loading) return <div className="h-screen flex items-center justify-center font-black text-indigo-600 animate-pulse uppercase tracking-widest">Verifying Identity...</div>;
+
+            if (!user) return (
+                <div className="min-h-screen flex items-center justify-center p-6">
+                    <div className="bg-white p-10 rounded-[3rem] shadow-2xl w-full max-w-md border border-slate-100">
+                        <div className="flex justify-center mb-8 animate-subtle-bounce"><Logo /></div>
+                        <h2 className="text-3xl font-black text-center mb-1 tracking-tighter text-slate-900">FinTrack Pro</h2>
+                        <p className="text-slate-400 text-center mb-8 font-bold text-[10px] tracking-widest uppercase">Secure Account Access</p>
+                        <form onSubmit={handleAuth} className="space-y-4">
+                            <input type="email" placeholder="Email Address" required className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold" onChange={e => setAuthData({...authData, email: e.target.value})} />
+                            <input type="password" placeholder="Password" required className="w-full p-4 bg-slate-50 rounded-2xl outline-none font-bold" onChange={e => setAuthData({...authData, password: e.target.value})} />
+                            {error && <div className="p-4 bg-red-50 text-red-600 text-[10px] font-bold rounded-xl border border-red-100 uppercase">{error}</div>}
+                            <button className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black shadow-xl active:scale-95 transition-all">
+                                {isSubmitting ? '...' : (authMode === 'login' ? 'SIGN IN' : 'CREATE ACCOUNT')}
+                            </button>
+                        </form>
+                        <button onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')} className="w-full mt-6 text-[10px] text-indigo-600 font-black uppercase tracking-widest">
+                            {authMode === 'login' ? 'Register New User' : 'Return to Login'}
+                        </button>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="max-w-md mx-auto min-h-screen pb-32 px-6">
+                    <header className="flex justify-between items-center py-8">
+                        <div className="flex items-center gap-3">
+                            <Logo />
+                            <h1 className="text-xl font-black tracking-tighter">FinTrack</h1>
+                        </div>
+                        <button onClick={() => signOut(auth)} className="p-3 bg-red-50 text-red-500 rounded-2xl shadow-sm text-xs font-bold">LOGOUT</button>
+                    </header>
+
+                    <section className="bg-slate-900 text-white p-8 rounded-[3.5rem] shadow-2xl relative overflow-hidden mb-10">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
+                        <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Net Worth</p>
+                        <h2 className="text-5xl font-black mb-10 tracking-tighter">₹{(totals.income - totals.expense - totals.investment).toLocaleString()}</h2>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-white/5 p-4 rounded-3xl border border-white/5 backdrop-blur-md">
+                                <span className="text-[9px] text-emerald-400 font-black uppercase">Income</span>
+                                <p className="text-lg font-bold">₹{totals.income.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-white/5 p-4 rounded-3xl border border-white/5 backdrop-blur-md">
+                                <span className="text-[9px] text-red-400 font-black uppercase">Spent</span>
+                                <p className="text-lg font-bold">₹{totals.expense.toLocaleString()}</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <div className="flex gap-1.5 bg-slate-200/50 p-1.5 rounded-2xl mb-8">
+                        {['all', 'income', 'expense', 'investment'].map(t => (
+                            <button key={t} onClick={() => setActiveTab(t)} className={`flex-1 py-2 text-[10px] font-black rounded-xl capitalize transition-all ${activeTab === t ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>{t}</button>
+                        ))}
+                    </div>
+
+                    <div className="space-y-4">
+                        {transactions.filter(t => activeTab === 'all' || t.type === activeTab).length === 0 ? (
+                            <div className="text-center py-20 text-slate-300 font-bold uppercase tracking-widest text-xs italic">No Records Found</div>
+                        ) : (
+                            transactions.filter(t => activeTab === 'all' || t.type === activeTab).map(t => (
+                                <div key={t.id} className="bg-white p-6 rounded-[2.5rem] border flex justify-between items-center shadow-sm">
+                                    <div className="flex items-center gap-4">
+                                        <div className={`p-4 rounded-2xl ${t.type === 'income' ? 'bg-emerald-50 text-emerald-500' : 'bg-indigo-50 text-indigo-500'}`}>
+                                            {t.type === 'income' ? '📈' : '🛒'}
+                                        </div>
+                                        <div>
+                                            <h4 className="font-bold text-sm leading-tight text-slate-800">{t.note || t.category}</h4>
+                                            <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest mt-1">{t.date} • {t.method}</p>
+                                        </div>
+                                    </div>
+                                    <p className={`font-black ${t.type === 'income' ? 'text-emerald-500' : 'text-slate-900'}`}>
+                                        {t.type === 'income' ? '+' : '-'}₹{t.amount.toLocaleString()}
+                                    </p>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    <button onClick={() => setShowModal(true)} className="fixed bottom-10 right-8 bg-indigo-600 text-white w-16 h-16 rounded-[2rem] shadow-2xl text-4xl font-bold flex items-center justify-center transition-all z-50">＋</button>
+
+                    {showModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[60] flex items-end sm:items-center justify-center p-4">
+                            <div className="bg-white w-full max-w-md rounded-[3rem] p-10 shadow-2xl animate-in slide-in-from-bottom duration-300">
+                                <div className="flex justify-between items-center mb-8"><h2 className="text-2xl font-black">New Record</h2><button onClick={() => setShowModal(false)} className="text-slate-400 font-bold">✕</button></div>
+                                <form className="space-y-6" onSubmit={handleAdd}>
+                                    <div className="flex gap-1.5 bg-slate-100 p-1.5 rounded-2xl">
+                                        {['income', 'expense', 'investment'].map(type => (
+                                            <button key={type} type="button" onClick={() => setFormData({...formData, type})} className={`flex-1 py-3 rounded-xl text-[10px] font-black capitalize ${formData.type === type ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}>{type}</button>
+                                        ))}
+                                    </div>
+                                    <div className="text-center">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Amount</label>
+                                        <input type="number" required placeholder="0.00" className="w-full text-5xl font-black text-center outline-none border-b-2 border-slate-50 focus:border-indigo-500 pb-2 transition-all" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <select className="bg-slate-50 p-4 rounded-2xl font-bold border-none outline-none" value={formData.method} onChange={e => setFormData({...formData, method: e.target.value})}><option>UPI</option><option>Cash</option><option>Bank Transfer</option></select>
+                                        <select className="bg-slate-50 p-4 rounded-2xl font-bold border-none outline-none" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+                                            {formData.type === 'income' ? <><option>Salary</option><option>Freelance</option><option>Gift</option></> : <><option>Food</option><option>Shopping</option><option>Bills</option><option>Rent</option></>}
+                                        </select>
+                                    </div>
+                                    <input type="text" placeholder="Note (Optional)..." className="w-full bg-slate-50 p-4 rounded-2xl font-bold outline-none" value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})} />
+                                    <button disabled={isSubmitting} className="w-full bg-slate-900 text-white font-black py-5 rounded-3xl shadow-xl">{isSubmitting ? 'SAVING...' : 'CONFIRM RECORD'}</button>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+        </html>
